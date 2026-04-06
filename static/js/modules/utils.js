@@ -1,8 +1,20 @@
-const hiddenMessage = (message, duration) => {
-     setTimeout((e) => {
-        message.textContent = "";
-        message.classList.remove("error");
-    }, duration);
+const showAlert = (title, text, icon) => Swal.fire({ title, text, icon, });
+
+const showAlertToast = (icon, title) => {
+    Swal.mixin({
+        toast: true,
+        position: "top",
+        showConfirmButton: false,
+        timer: 3000,
+        timerProgressBar: true,
+        didOpen: (toast) => {
+            toast.onmouseenter = Swal.stopTimer;
+            toast.onmouseleave = Swal.resumeTimer;
+        }
+    }).fire({
+        icon,
+        title,
+    });
 }
 
 // Username: letras, números, punto, guion y guion bajo
@@ -18,7 +30,8 @@ const validatePassword = (input) => {
 };
 
 export {
-    hiddenMessage,
+    showAlert,
+    showAlertToast,
     validateUsername,
     validatePassword,
 }

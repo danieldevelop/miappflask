@@ -1,7 +1,7 @@
 "use strict";
 
 import { authenticateUser, logoutUser } from "./modules/auth.js";
-import { hiddenMessage, validateUsername, validatePassword } from "./modules/utils.js";
+import {validateUsername, validatePassword, showAlertToast} from "./modules/utils.js";
 
 let fullYear = String(new Date().getFullYear()); // Obtengo el año actual para mostrarlo en el footer
 
@@ -33,28 +33,12 @@ if (formLogin) {
         const remember = document.querySelector("#remember")?.checked || false;
         const message = document.querySelector("#message");
 
-        const showError = (text) => {
-            if (!message) return;
-            message.textContent = text;
-            message.classList.remove("success");
-            message.classList.add("error");
-            hiddenMessage(message, 3000);
-        };
+        if (!usuario) return showAlertToast("error", "El campo Usuario no puede estar vacio");
+        if (!clave) return showAlertToast("error", "El campo Contraseña no puede estar vacio");
+        if (!validateUsername(usuario)) return showAlertToast("error", "El campo Usuario solo puede contener letras, números, puntos, guiones o guiones bajos");
+        if (!validatePassword(clave)) return showAlertToast("error", "La contraseña debe tener al menos 8 caracteres, una mayúscula, una minúscula y un número");
 
-        const showSuccess = (text) => {
-            if (!message) return;
-            message.textContent = text;
-            message.classList.remove("error");
-            message.classList.add("success");
-            hiddenMessage(message, 3000);
-        };
-
-        if (!usuario) return showError("El campo Usuario no puede estar vacio");
-        if (!clave) return showError("El campo Contraseña no puede estar vacio");
-        if (!validateUsername(usuario)) return showError("El campo Usuario no puede contener caracteres especiales, solo un punto, guion o guion bajo");
-        if (!validatePassword(clave)) return showError("El campo Contraseña debe tener al menos 8 caracteres, una mayúscula, una minúscula y un número");
-
-        await authenticateUser(usuario, clave, remember, showError, showSuccess);
+        await authenticateUser(usuario, clave, remember);
     });
 }
 
@@ -62,6 +46,14 @@ const btnLogout = document.querySelector("#btn-logout");
 
 if (btnLogout) {
     btnLogout.addEventListener("click", async () => {
+        await logoutUser();
+    });
+}
+
+const btnLogoutClosed = document.querySelector("#btn-logout-closed");
+
+if (btnLogoutClosed) {
+    btnLogoutClosed.addEventListener("click", async () => {
         await logoutUser();
     });
 }

@@ -1,5 +1,7 @@
 "use strict"
 
+import { showAlertToast } from "./utils.js";
+
 const authenticateUser = async (usuario, clave, remember, showError, showSuccess) => {
     try {
         const res = await fetch("/login", {
@@ -15,16 +17,14 @@ const authenticateUser = async (usuario, clave, remember, showError, showSuccess
         const data = await res.json();
 
         if (!res.ok || !data.ok) {
-            return showError(data.message || "Error al iniciar sesion");
+            return showAlertToast( "error", data.message || "Error al iniciar sesión");
         }
 
-        showSuccess(data.message || "Login correcto");
+        showAlertToast("success", data.message || "Login correcto");
 
-        // Opcional: redireccion
         if (data.redirect) window.location.href = data.redirect;
     } catch (error) {
-        showError("No se pudo conectar con el servidor");
-        console.error(error);
+        showAlertToast("error", "No se pudo conectar con el servidor");
     }
 }
 
@@ -40,7 +40,7 @@ const logoutUser = async () => {
         const data = await res.json();
 
         if (!res.ok || !data.ok) {
-            alert(data.message || "No se pudo cerrar sesión");
+            showAlertToast("error", data.message || "No se pudo cerrar sesión");
             return;
         }
 
@@ -48,8 +48,7 @@ const logoutUser = async () => {
             window.location.href = data.redirect;
         }
     } catch (error) {
-        console.error("Error al cerrar sesión:", error);
-        alert("No se pudo conectar con el servidor");
+        showAlertToast("error", "No se pudo conectar con el servidor");
     }
 };
 
