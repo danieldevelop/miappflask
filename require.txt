@@ -6,3 +6,4 @@ itsdangerous
 MarkupSafe
 dotenv
 python-dotenv
+Flask-SQLAlchemy
