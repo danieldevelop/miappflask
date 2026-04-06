@@ -19,6 +19,8 @@ class User(db.Model):
 
     # WebAuthn/Passkeys
     webauthn_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    biometric_login_enabled = db.Column(db.Boolean, default=True, nullable=False)
+    last_login_at = db.Column(db.DateTime, nullable=True)
 
     def set_password(self, raw_password: str) -> None:
         self.password_hash = generate_password_hash(raw_password)

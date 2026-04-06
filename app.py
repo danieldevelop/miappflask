@@ -60,13 +60,29 @@ def run_sqlite_compat_migrations() -> None:
     with db.engine.connect() as conn:
         columns = conn.execute(text("PRAGMA table_info(users)")).fetchall()
         existing = {row[1] for row in columns}
+
         if "webauthn_enabled" not in existing:
             conn.execute(
                 text(
                     "ALTER TABLE users ADD COLUMN webauthn_enabled BOOLEAN NOT NULL DEFAULT 0"
                 )
             )
-            conn.commit()
+
+        if "biometric_login_enabled" not in existing:
+            conn.execute(
+                text(
+                    "ALTER TABLE users ADD COLUMN biometric_login_enabled BOOLEAN NOT NULL DEFAULT 1"
+                )
+            )
+
+        if "last_login_at" not in existing:
+            conn.execute(
+                text(
+                    "ALTER TABLE users ADD COLUMN last_login_at DATETIME NULL"
+                )
+            )
+
+        conn.commit()
 
 """ Se crea intancia de Flask para iniciar un servidor web. """
 app = Flask(__name__)
@@ -79,10 +95,14 @@ db.init_app(app)
 """ Importamos y registramos el Blueprint """
 from route.web import web
 app.register_blueprint(web)
+from route.facial import facial_bp
+app.register_blueprint(facial_bp)
 
 # Importa modelos para que SQLAlchemy los registre
 from models.user import User  # noqa: F401
 from models.webauthn_credential import WebauthnCredential  # noqa: F401
+from models.auth_event import AuthEvent  # noqa: F401
+from models.facial_embedding import FacialEmbedding  # noqa: F401
 
 with app.app_context():
     db.create_all()
