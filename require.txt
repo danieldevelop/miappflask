@@ -1,0 +1,8 @@
+Flask
+Jinja2
+Werkzeug
+click
+itsdangerous
+MarkupSafe
+dotenv
+python-dotenv
