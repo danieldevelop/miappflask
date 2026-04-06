@@ -1,0 +1,23 @@
+{% extends 'layout.html' %}
+
+{% block title %}Configurar 2FA - MiAppFlask{% endblock %}
+
+{% block content %}
+    <h2>Configurar autenticación en dos pasos</h2>
+
+    <p>1. Escanea este código QR con Google Authenticator, Microsoft Authenticator o Authy.</p>
+
+    <p>
+        <img src="data:image/png;base64,{{ qr_code_b64 }}" alt="QR TOTP">
+    </p>
+
+    <p><strong>Clave manual:</strong> {{ secret }}</p>
+
+    <p>2. Ingresa el código de 6 dígitos generado por tu app.</p>
+
+    <form id="form-totp-setup">
+        <input type="text" id="totp-setup-code" name="code" maxlength="6" autocomplete="one-time-code">
+        <p id="message"></p>
+        <button type="submit">Activar 2FA</button>
+    </form>
+{% endblock %}
