@@ -5,23 +5,27 @@
 {% block content %}
     <h2>Iniciar Sesión</h2>
 
-    <form action="{{ url_for('web.login') }}" method="POST">
+{#    <form action="{{ url_for('web.login') }}" method="POST">#}
+    <form id="form-login">
         <table cellpadding="5" cellspacing="4" border="0">
             <tbody>
                 <tr>
                     <td><strong>Usuario:</strong></td>
-                    <td><input type="text" name="username" /></td>
+                    <td><input type="text" name="username" id="username" /></td>
                 </tr>
                 <tr>
                     <td><strong>Contraseña:</strong></td>
-                    <td><input type="password" name="password" /></td>
+                    <td><input type="password" name="password" id="password"/></td>
                 </tr>
                 <tr>
                     <td><input type="checkbox" name="remember_me" id="remember_me">Recordame</td>
                 </tr>
+                <tr>
+                    <td colspan="2" align="center"><p id="message"></p></td>
+                </tr>
 
                 <tr>
-                    <td colspan="2" align="center"><button type="submit">Iniciar Sesión</button></td>
+                    <td colspan="2" align="center"><button type="button">Iniciar Sesión</button></td>
                 </tr>
             </tbody>
         </table>
@@ -30,6 +34,6 @@
 
 {% block script_js %}
     <script>
-        console.log("Este script esta siendo ejecutado desde la pagina de login")
+       {#Code, especifico para este archivo, va aquí#}
     </script>
 {% endblock %}
