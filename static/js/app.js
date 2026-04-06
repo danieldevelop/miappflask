@@ -42,7 +42,7 @@ if (formLogin) {
     });
 }
 
-
+const form2fa = document.querySelector("#form-2fa");
 if (form2fa) {
     form2fa.addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -54,6 +54,7 @@ if (form2fa) {
     });
 }
 
+const formTotpSetup = document.querySelector("#form-totp-setup");
 if (formTotpSetup) {
     formTotpSetup.addEventListener("submit", async (e) => {
         e.preventDefault();
