@@ -10,3 +10,5 @@ Flask-SQLAlchemy
 pyotp
 qrcode
 Pillow
+webauthn
+cryptography==46.0.6
