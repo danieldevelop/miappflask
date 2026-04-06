@@ -191,10 +191,16 @@ def verify_2fa():
 
     return render_template("pages/verify_2fa.html")
 
+
 @web.route("/dashboard")
 @page_login_required
 def dashboard():
-    return render_template("pages/dashboard.html")
+    user = db.session.get(User, session["user_id"])  # Obtener usuario
+    if not user:
+        session.clear()
+        return redirect(url_for("web.login"))
+
+    return render_template("pages/dashboard.html", user=user)  # Pasar usuario al template
 
 @web.route("/logout", methods=["POST"])
 @api_login_required
