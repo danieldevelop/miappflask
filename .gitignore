@@ -2,3 +2,5 @@
 .idea/
 __pycache__/
 .env
+instance/miapp.db
+instance/*.db
