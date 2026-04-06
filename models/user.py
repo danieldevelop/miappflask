@@ -17,6 +17,9 @@ class User(db.Model):
     two_factor_method = db.Column(db.String(20), nullable=True)  # "totp"
     totp_secret = db.Column(db.String(64), nullable=True)
 
+    # WebAuthn/Passkeys
+    webauthn_enabled = db.Column(db.Boolean, default=False, nullable=False)
+
     def set_password(self, raw_password: str) -> None:
         self.password_hash = generate_password_hash(raw_password)
 

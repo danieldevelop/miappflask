@@ -3,21 +3,180 @@
 {% block title %} Dashboard - MiAppFlask {% endblock %}
 
 {% block content %}
-    <h2 class="text-center mt-5">Bienvenido al Dashboard</h2>
-    <p class="text-center">Esta es la página principal de tu aplicación después de iniciar sesión.</p>
+    <div class="container mt-5">
+        <h2 class="text-center">Bienvenido al Dashboard</h2>
+        <p class="text-center">Esta es la página principal de tu aplicación después de iniciar sesión.</p>
 
-    {% if user and user.two_factor_enabled %}
-        <p class="text-center"><strong>2FA:</strong> Activado ({{ user.two_factor_method|upper }})</p>
-    {% else %}
-        <p class="text-center"><strong>2FA:</strong> No activado</p>
-        <p class="text-center"><a href="{{ url_for('web.setup_2fa') }}">Activar 2FA con TOTP</a></p>
-    {% endif %}
+        <!-- 2FA TOTP -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5>Autenticación de Dos Factores (2FA)</h5>
+            </div>
+            <div class="card-body">
+                {% if user and user.two_factor_enabled %}
+                    <p><strong>2FA:</strong> ✅ Activado ({{ user.two_factor_method|upper }})</p>
+                {% else %}
+                    <p><strong>2FA:</strong> ❌ No activado</p>
+                    <p><a href="{{ url_for('web.setup_2fa') }}" class="btn btn-primary btn-sm">Activar 2FA con TOTP</a></p>
+                {% endif %}
+            </div>
+        </div>
 
-    <button type="button" id="btn-logout-closed" class="btn btn-primary mt-4 d-block mx-auto fw-bold">Cerrar sesión</button>
+        <!-- WebAuthn/Passkeys -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5>Autenticación Biométrica (Huella/Cara)</h5>
+            </div>
+            <div class="card-body">
+                {% if user and user.webauthn_enabled %}
+                    <p><strong>Biometría:</strong> ✅ Activada</p>
+                    <button type="button" id="btn-add-biometric" class="btn btn-success btn-sm me-2">Agregar otro dispositivo</button>
+                    <button type="button" id="btn-list-biometric" class="btn btn-info btn-sm">Ver dispositivos</button>
+                {% else %}
+                    <p><strong>Biometría:</strong> ❌ No activada</p>
+                    <button type="button" id="btn-setup-biometric" class="btn btn-warning btn-sm">Activar Huella/Cara</button>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Botón Logout -->
+        <div class="text-center mt-4">
+            <button type="button" id="btn-logout-closed" class="btn btn-danger">Cerrar sesión</button>
+        </div>
+    </div>
+
+    <!-- Modal para dispositivos biométricos -->
+    <div class="modal fade" id="biometricModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Dispositivos Biométricos</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="devicesList">
+                    Cargando...
+                </div>
+            </div>
+        </div>
+    </div>
 {% endblock %}
 
 {% block script_js %}
+    <script src="{{ url_for('static', filename='js/modules/webauthn.js') }}"></script>
     <script>
-       {#Code, especifico para este archivo, va aquí#}
+        const webauthn = new WebAuthnManager();
+        const messageDiv = document.createElement('div');
+        messageDiv.id = 'message';
+        messageDiv.className = 'alert alert-info mt-3';
+        messageDiv.style.display = 'none';
+        document.querySelector('.container').appendChild(messageDiv);
+
+        function showMessage(text, type = 'info') {
+            messageDiv.textContent = text;
+            messageDiv.className = `alert alert-${type} mt-3`;
+            messageDiv.style.display = 'block';
+            setTimeout(() => messageDiv.style.display = 'none', 4000);
+        }
+
+        // Botón para activar biometría
+        document.getElementById('btn-setup-biometric')?.addEventListener('click', async () => {
+            try {
+                const result = await webauthn.startRegistration('Mi dispositivo');
+                if (result.ok) {
+                    showMessage('✅ Biometría activada correctamente', 'success');
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    showMessage('❌ ' + result.message, 'danger');
+                }
+            } catch (error) {
+                showMessage('❌ Error: ' + error.message, 'danger');
+            }
+        });
+
+        // Botón para agregar otro dispositivo
+        document.getElementById('btn-add-biometric')?.addEventListener('click', async () => {
+            try {
+                const deviceName = prompt('Nombre del dispositivo (ej: iPhone de Juan):');
+                if (!deviceName) return;
+
+                const result = await webauthn.startRegistration(deviceName);
+                if (result.ok) {
+                    showMessage('✅ Dispositivo agregado correctamente', 'success');
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    showMessage('❌ ' + result.message, 'danger');
+                }
+            } catch (error) {
+                showMessage('❌ Error: ' + error.message, 'danger');
+            }
+        });
+
+        // Botón para listar dispositivos
+        document.getElementById('btn-list-biometric')?.addEventListener('click', async () => {
+            try {
+                const response = await fetch('/webauthn/credentials', {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+
+                if (data.ok) {
+                    let html = '<ul class="list-group">';
+                    for (const cred of data.credentials) {
+                        html += `
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong>${cred.device_name}</strong>
+                                    <br><small class="text-muted">Registrado: ${new Date(cred.created_at).toLocaleDateString()}</small>
+                                </div>
+                                <button class="btn btn-sm btn-danger" onclick="deleteCredential(${cred.id})">Eliminar</button>
+                            </li>
+                        `;
+                    }
+                    html += '</ul>';
+                    document.getElementById('devicesList').innerHTML = html;
+                    new bootstrap.Modal(document.getElementById('biometricModal')).show();
+                }
+            } catch (error) {
+                showMessage('❌ Error al cargar dispositivos: ' + error.message, 'danger');
+            }
+        });
+
+        async function deleteCredential(credentialId) {
+            if (!confirm('¿Estás seguro de que deseas eliminar este dispositivo?')) return;
+
+            try {
+                const response = await fetch(`/webauthn/credentials/${credentialId}`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+
+                if (data.ok) {
+                    showMessage('✅ Dispositivo eliminado', 'success');
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    showMessage('❌ ' + data.message, 'danger');
+                }
+            } catch (error) {
+                showMessage('❌ Error al eliminar: ' + error.message, 'danger');
+            }
+        }
+
+        // Logout
+        document.getElementById('btn-logout-closed').addEventListener('click', async () => {
+            try {
+                const response = await fetch('/logout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                if (data.ok) {
+                    window.location.href = data.redirect;
+                }
+            } catch (error) {
+                console.error('Error en logout:', error);
+            }
+        });
     </script>
 {% endblock %}
