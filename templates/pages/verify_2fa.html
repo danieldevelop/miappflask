@@ -1,0 +1,14 @@
+{% extends 'layout.html' %}
+
+{% block title %}Verificar 2FA - MiAppFlask{% endblock %}
+
+{% block content %}
+    <h2>Verificación en dos pasos</h2>
+    <p>Ingresa el código de 6 dígitos de tu aplicación autenticadora.</p>
+
+    <form id="form-2fa">
+        <input type="text" id="code" name="code" maxlength="6" autocomplete="one-time-code">
+        <p id="message"></p>
+        <button type="submit">Verificar</button>
+    </form>
+{% endblock %}

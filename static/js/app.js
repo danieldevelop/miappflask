@@ -1,6 +1,6 @@
 "use strict";
 
-import { authenticateUser, logoutUser } from "./modules/auth.js";
+import { authenticateUser, logoutUser, enableTotp, verifyTotpCode } from "./modules/auth.js";
 import {validateUsername, validatePassword, showAlertToast} from "./modules/utils.js";
 
 let fullYear = String(new Date().getFullYear()); // Obtengo el año actual para mostrarlo en el footer
@@ -39,6 +39,30 @@ if (formLogin) {
         if (!validatePassword(clave)) return showAlertToast("error", "La contraseña debe tener al menos 8 caracteres, una mayúscula, una minúscula y un número");
 
         await authenticateUser(usuario, clave, remember);
+    });
+}
+
+const form2fa = document.querySelector("#form-2fa");
+if (form2fa) {
+    form2fa.addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        const code = document.querySelector("#code")?.value.trim() || "";
+
+        if (!code) return showAlertToast("error","Debes ingresar el codigo TOTP");
+        await verifyTotpCode(code);
+    });
+}
+
+const formTotpSetup = document.querySelector("#form-totp-setup");
+if (formTotpSetup) {
+    formTotpSetup.addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        const code = document.querySelector("#totp-setup-code")?.value.trim() || "";
+
+        if (!code) return showAlertToast("error", "Debes ingresar el codigo para activar 2FA");
+        await enableTotp(code);
     });
 }
 

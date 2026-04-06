@@ -7,3 +7,6 @@ MarkupSafe
 dotenv
 python-dotenv
 Flask-SQLAlchemy
+pyotp
+qrcode
+Pillow

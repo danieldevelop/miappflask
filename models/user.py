@@ -11,6 +11,12 @@ class User(db.Model):
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
+    email = db.Column(db.String(255), unique=True, nullable=True)
+
+    two_factor_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    two_factor_method = db.Column(db.String(20), nullable=True)  # "totp"
+    totp_secret = db.Column(db.String(64), nullable=True)
+
     def set_password(self, raw_password: str) -> None:
         self.password_hash = generate_password_hash(raw_password)
 

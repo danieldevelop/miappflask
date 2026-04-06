@@ -6,6 +6,13 @@
     <h2 class="text-center mt-5">Bienvenido al Dashboard</h2>
     <p class="text-center">Esta es la página principal de tu aplicación después de iniciar sesión.</p>
 
+    {% if user and user.two_factor_enabled %}
+        <p class="text-center"><strong>2FA:</strong> Activado ({{ user.two_factor_method|upper }})</p>
+    {% else %}
+        <p class="text-center"><strong>2FA:</strong> No activado</p>
+        <p class="text-center"><a href="{{ url_for('web.setup_2fa') }}">Activar 2FA con TOTP</a></p>
+    {% endif %}
+
     <button type="button" id="btn-logout-closed" class="btn btn-primary mt-4 d-block mx-auto fw-bold">Cerrar sesión</button>
 {% endblock %}
 
