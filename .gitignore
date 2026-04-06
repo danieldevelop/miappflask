@@ -1,6 +1,6 @@
 .venv/
 .idea/
-__pycache__/
+__pycache__/*
 .env
 instance/miapp.db
 instance/*.db
