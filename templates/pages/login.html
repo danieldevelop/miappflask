@@ -1,0 +1,35 @@
+{% extends 'layout.html' %}
+
+{% block title %} Login - MiAppFlask {% endblock %}
+
+{% block content %}
+    <h2>Iniciar Sesión</h2>
+
+    <form action="{{ url_for('web.login') }}" method="POST">
+        <table cellpadding="5" cellspacing="4" border="0">
+            <tbody>
+                <tr>
+                    <td><strong>Usuario:</strong></td>
+                    <td><input type="text" name="username" /></td>
+                </tr>
+                <tr>
+                    <td><strong>Contraseña:</strong></td>
+                    <td><input type="password" name="password" /></td>
+                </tr>
+                <tr>
+                    <td><input type="checkbox" name="remember_me" id="remember_me">Recordame</td>
+                </tr>
+
+                <tr>
+                    <td colspan="2" align="center"><button type="submit">Iniciar Sesión</button></td>
+                </tr>
+            </tbody>
+        </table>
+    </form>
+{% endblock %}
+
+{% block script_js %}
+    <script>
+        console.log("Este script esta siendo ejecutado desde la pagina de login")
+    </script>
+{% endblock %}
