@@ -28,6 +28,14 @@
                 <h5>Autenticación Biométrica (Huella/Cara)</h5>
             </div>
             <div class="card-body">
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" role="switch" id="biometric-login-toggle"
+                           {% if user and user.biometric_login_enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="biometric-login-toggle">
+                        Permitir inicio de sesión biométrico
+                    </label>
+                </div>
+
                 {% if user and user.webauthn_enabled %}
                     <p><strong>Biometría:</strong> ✅ Activada</p>
                     <button type="button" id="btn-add-biometric" class="btn btn-success btn-sm me-2">Agregar otro dispositivo</button>
@@ -36,6 +44,80 @@
                     <p><strong>Biometría:</strong> ❌ No activada</p>
                     <button type="button" id="btn-setup-biometric" class="btn btn-warning btn-sm">Activar Huella/Cara</button>
                 {% endif %}
+            </div>
+        </div>
+
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5>Fase 2 - Hoja de Ruta de Biometría</h5>
+            </div>
+            <div class="card-body">
+                <p class="mb-1"><strong>Face Recognition:</strong> {{ biometric_capabilities.future_providers.face_recognition }}</p>
+                <p class="mb-1"><strong>Gait Recognition:</strong> {{ biometric_capabilities.future_providers.gait_recognition }}</p>
+                <p class="mb-0"><strong>Full Body Detection:</strong> {{ biometric_capabilities.future_providers.full_body_detection }}</p>
+            </div>
+        </div>
+
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5>Fase 2.1 - Últimos Accesos</h5>
+            </div>
+            <div class="card-body">
+                {% if recent_events %}
+                    <ul class="list-group" id="recent-events-list">
+                        {% for event in recent_events %}
+                            <li class="list-group-item d-flex justify-content-between align-items-start">
+                                <div>
+                                    <strong>{{ event.method|upper }}</strong> - {{ event.event_type }}
+                                    <br>
+                                    <small class="text-muted">{{ event.detail or '-' }}</small>
+                                </div>
+                                <small class="text-muted">{{ event.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</small>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="mb-0">Sin eventos de acceso aún.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Reconocimiento Facial - Registro -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5>📹 Reconocimiento Facial (Fase 2.2C)</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <button type="button" id="btn-facial-register" class="btn btn-primary btn-sm">
+                        📹 Registrar Rostro
+                    </button>
+                </div>
+
+                <div id="facial-register-container" style="display: none;">
+                    <video id="dashboardFacialVideo" width="280" height="210" style="border: 2px solid #ccc; display: block; margin: 0 auto 10px; background: #000;"></video>
+                    <canvas id="dashboardFacialCanvas" width="280" height="210" style="display: none;"></canvas>
+                    <div id="facial-register-status" class="alert alert-info" style="display: none;"></div>
+
+                    <div class="mb-3">
+                        <label for="facial-device-name" class="form-label">Nombre del dispositivo</label>
+                        <input type="text" class="form-control" id="facial-device-name" placeholder="ej: Mi cara en el trabajo">
+                    </div>
+
+                    <button type="button" id="btn-facial-capture" class="btn btn-success btn-sm" style="display: none;">
+                        ✅ Guardar Rostro
+                    </button>
+                    <button type="button" id="btn-facial-stop-register" class="btn btn-secondary btn-sm" style="display: none;">
+                        ⏹️ Cancelar
+                    </button>
+                </div>
+
+                <hr>
+
+                <h6>Rostros Registrados</h6>
+                <ul class="list-group" id="facial-list">
+                    <li class="list-group-item">Cargando...</li>
+                </ul>
             </div>
         </div>
 
@@ -63,7 +145,232 @@
 
 {% block script_js %}
     <script src="{{ url_for('static', filename='js/modules/webauthn.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/facial_camera.js') }}"></script>
     <script>
+        // Cargar módulo facial_camera primero
+        let facialCaptureRegister = null;
+        let lastRegisterDetectionTime = 0;
+
+        function setRegisterButtonEnabled(enabled) {
+            const captureButton = document.getElementById('btn-facial-capture');
+            captureButton.style.display = enabled ? 'inline-block' : 'none';
+            captureButton.disabled = !enabled;
+        }
+
+        function getFacialGuidanceTips(livenessScore, minLivenessRequired) {
+            const tips = [
+                '💡 Mejora la iluminación del rostro y evita contraluz.',
+                '🎯 Centra tu cara dentro del recuadro de la cámara.',
+                '📏 Acércate un poco más para que el rostro ocupe más espacio.',
+            ];
+
+            if (livenessScore < Math.max(0.12, minLivenessRequired - 0.05)) {
+                tips.push('👀 Abre bien los ojos y evita quedarte completamente inmóvil.');
+            } else {
+                tips.push('🙂 Mantén la mirada al frente y evita girar la cabeza.');
+            }
+
+            return tips;
+        }
+
+        function buildLowLivenessMessage(actionLabel, confidencePct, livenessPct, minLivenessPct, tips) {
+            const tipsHtml = tips.map(tip => `<li>${tip}</li>`).join('');
+            return `
+                ⚠️ Rostro detectado, pero aún no se puede ${actionLabel}<br>
+                Confianza: ${confidencePct}%<br>
+                Liveness actual: ${livenessPct}%<br>
+                Mínimo requerido: ${minLivenessPct}%
+                <ul class="mb-0 mt-2 ps-3">${tipsHtml}</ul>
+            `;
+        }
+
+        async function loadFacialEmbeddings() {
+            try {
+                const response = await fetch('/facial/embeddings', {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+
+                const list = document.getElementById('facial-list');
+                if (data.ok && data.embeddings.length > 0) {
+                    list.innerHTML = data.embeddings.map(emb => `
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong>${emb.device_name || 'Sin nombre'}</strong><br>
+                                <small class="text-muted">
+                                    Liveness: ${(emb.liveness_score * 100).toFixed(1)}%<br>
+                                    Registrado: ${new Date(emb.created_at).toLocaleDateString()}
+                                </small>
+                            </div>
+                            <button class="btn btn-sm btn-danger" onclick="deleteFacialEmbedding(${emb.id})">Eliminar</button>
+                        </li>
+                    `).join('');
+                } else {
+                    list.innerHTML = '<li class="list-group-item text-muted">No hay rostros registrados</li>';
+                }
+            } catch (error) {
+                console.error('Error cargando embeddings:', error);
+            }
+        }
+
+        async function deleteFacialEmbedding(embeddingId) {
+            if (!confirm('¿Estás seguro de que deseas eliminar este rostro?')) return;
+
+            try {
+                const response = await fetch(`/facial/embeddings/${embeddingId}`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+
+                if (data.ok) {
+                    showMessage('✅ Rostro eliminado', 'success');
+                    loadFacialEmbeddings();
+                } else {
+                    showMessage('❌ ' + data.message, 'danger');
+                }
+            } catch (error) {
+                showMessage('❌ Error: ' + error.message, 'danger');
+            }
+        }
+
+        document.getElementById('btn-facial-register')?.addEventListener('click', async () => {
+            try {
+                if (typeof window.FacialCameraCapture === 'undefined') {
+                    showMessage('❌ Módulo facial no cargado', 'danger');
+                    return;
+                }
+
+                facialCaptureRegister = new window.FacialCameraCapture();
+                await facialCaptureRegister.init('dashboardFacialVideo', 'dashboardFacialCanvas');
+
+                document.getElementById('facial-register-container').style.display = 'block';
+                document.getElementById('btn-facial-register').style.display = 'none';
+                setRegisterButtonEnabled(false);
+                document.getElementById('btn-facial-stop-register').style.display = 'inline-block';
+                showMessage('🎥 Cámara iniciada. Mira a la cámara...', 'info');
+
+                facialCaptureRegister.startDetection(async (frameData) => {
+                    const now = Date.now();
+                    if (now - lastRegisterDetectionTime < 500) return;
+                    lastRegisterDetectionTime = now;
+
+                    try {
+                        const response = await fetch('/facial/detect-frame', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ frame: frameData })
+                        });
+                        const data = await response.json();
+
+                        const statusDiv = document.getElementById('facial-register-status');
+                        statusDiv.style.display = 'block';
+
+                        if (data.ok && data.face_detected) {
+                            const livenessPct = (data.liveness_score * 100).toFixed(1);
+                            const minLivenessPct = ((data.min_liveness_required || 0) * 100).toFixed(1);
+                            const confidencePct = (data.confidence * 100).toFixed(1);
+                            const guidanceTips = getFacialGuidanceTips(
+                                data.liveness_score || 0,
+                                data.min_liveness_required || 0
+                            );
+
+                            if (data.can_register) {
+                                statusDiv.className = 'alert alert-success';
+                                statusDiv.innerHTML = `
+                                    ✅ Rostro detectado<br>
+                                    Confianza: ${confidencePct}%<br>
+                                    Liveness: ${livenessPct}%
+                                `;
+                                setRegisterButtonEnabled(true);
+                            } else {
+                                statusDiv.className = 'alert alert-warning';
+                                statusDiv.innerHTML = buildLowLivenessMessage(
+                                    'guardar',
+                                    confidencePct,
+                                    livenessPct,
+                                    minLivenessPct,
+                                    guidanceTips
+                                );
+                                setRegisterButtonEnabled(false);
+                            }
+                        } else {
+                            statusDiv.className = 'alert alert-warning';
+                            statusDiv.innerHTML = '⏳ Buscando rostro...';
+                            setRegisterButtonEnabled(false);
+                        }
+                    } catch (error) {
+                        console.error('Error en detección:', error);
+                        setRegisterButtonEnabled(false);
+                    }
+                });
+
+            } catch (error) {
+                showMessage('❌ ' + error.message, 'danger');
+            }
+        });
+
+        document.getElementById('btn-facial-capture')?.addEventListener('click', async () => {
+            if (!facialCaptureRegister) {
+                showMessage('❌ Captura no inicializada', 'danger');
+                return;
+            }
+
+            const deviceName = document.getElementById('facial-device-name').value.trim() || 'Mi rostro';
+
+            try {
+                showMessage('🔄 Guardando rostro...', 'info');
+                const frameData = facialCaptureRegister.captureFrame();
+
+                if (!frameData || frameData.length < 100) {
+                    showMessage('❌ Frame vacío. Intenta nuevamente', 'danger');
+                    return;
+                }
+
+                const response = await fetch('/facial/register-embedding', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        frame: frameData,
+                        device_name: deviceName
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.ok) {
+                    showMessage('✅ Rostro guardado correctamente', 'success');
+                    document.getElementById('facial-device-name').value = '';
+                    loadFacialEmbeddings();
+                    setTimeout(() => {
+                        facialCaptureRegister.stop();
+                        document.getElementById('facial-register-container').style.display = 'none';
+                        document.getElementById('btn-facial-register').style.display = 'inline-block';
+                        setRegisterButtonEnabled(false);
+                    }, 1500);
+                } else {
+                    showMessage('❌ ' + data.message, 'danger');
+                }
+            } catch (error) {
+                showMessage('❌ Error: ' + error.message, 'danger');
+            }
+        });
+
+        document.getElementById('btn-facial-stop-register')?.addEventListener('click', () => {
+            if (facialCaptureRegister) {
+                facialCaptureRegister.stop();
+            }
+            document.getElementById('facial-register-container').style.display = 'none';
+            document.getElementById('btn-facial-register').style.display = 'inline-block';
+            setRegisterButtonEnabled(false);
+            document.getElementById('btn-facial-stop-register').style.display = 'none';
+            showMessage('🛑 Captura detenida', 'info');
+        });
+
+        // Cargar embeddings al cargar la página
+        loadFacialEmbeddings();
+
         const webauthn = new WebAuthnManager();
         const messageDiv = document.createElement('div');
         messageDiv.id = 'message';
@@ -162,6 +469,27 @@
                 showMessage('❌ Error al eliminar: ' + error.message, 'danger');
             }
         }
+
+        document.getElementById('biometric-login-toggle')?.addEventListener('change', async (e) => {
+            try {
+                const enabled = e.target.checked;
+                const response = await fetch('/webauthn/login-toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                const data = await response.json();
+                if (data.ok) {
+                    showMessage('✅ ' + data.message, 'success');
+                } else {
+                    showMessage('❌ ' + data.message, 'danger');
+                    e.target.checked = !enabled;
+                }
+            } catch (error) {
+                showMessage('❌ Error al actualizar preferencia biométrica', 'danger');
+                e.target.checked = !e.target.checked;
+            }
+        });
 
         // Logout
         document.getElementById('btn-logout-closed').addEventListener('click', async () => {

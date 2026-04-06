@@ -12,3 +12,8 @@ qrcode
 Pillow
 webauthn
 cryptography==46.0.6
+mediapipe
+# Nota: usar version 0.10.9 o anterior. Versiones 0.11+ tienen API diferente.
+opencv-python
+numpy
+scikit-learn

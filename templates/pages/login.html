@@ -21,6 +21,11 @@
                         🔒 Huella/Cara
                     </button>
                 </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="facial-tab" data-bs-toggle="tab" data-bs-target="#facial" type="button">
+                        📹 Reconocimiento Facial
+                    </button>
+                </li>
             </ul>
 
             <div class="tab-content mt-4" id="loginTabsContent">
@@ -61,6 +66,34 @@
                         Asegúrate de haber configurado biometría en tu cuenta antes.
                     </small>
                 </div>
+
+                <!-- Tab: Login Reconocimiento Facial -->
+                <div class="tab-pane fade" id="facial" role="tabpanel">
+                    <div class="mb-3">
+                        <label for="facialUsername" class="form-label">Usuario</label>
+                        <input type="text" class="form-control" id="facialUsername" placeholder="Ingresa tu usuario">
+                    </div>
+
+                    <div id="facial-container" style="display: none;">
+                        <video id="facialVideo" width="320" height="240" style="border: 2px solid #ccc; display: block; margin: 0 auto; background: #000;"></video>
+                        <canvas id="facialCanvas" width="320" height="240" style="display: none;"></canvas>
+                        <div id="facial-status" class="alert alert-info mt-2" style="display: none;"></div>
+                    </div>
+
+                    <button type="button" id="btn-facial-login" class="btn btn-info w-100 mt-2">
+                        📹 Iniciar Captura Facial
+                    </button>
+                    <button type="button" id="btn-facial-stop" class="btn btn-secondary w-100 mt-2" style="display: none;">
+                        ⏹️ Detener Captura
+                    </button>
+                      <button type="button" id="btn-facial-authenticate" class="btn btn-success w-100 mt-2" style="display: none;">
+                          ✅ Autenticar con Rostro
+                      </button>
+
+                    <small class="text-muted d-block mt-2">
+                        Permitir acceso a la cámara cuando se solicite.
+                    </small>
+                </div>
             </div>
         </div>
     </div>
@@ -68,9 +101,45 @@
 
 {% block script_js %}
     <script src="{{ url_for('static', filename='js/modules/webauthn.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modules/facial_camera.js') }}"></script>
     <script>
         const webauthn = new WebAuthnManager();
         const messageDiv = document.getElementById('message');
+        let facialCapture = null;
+        let lastDetectionTime = 0;
+
+        function setFacialAuthButtonEnabled(enabled) {
+            const authButton = document.getElementById('btn-facial-authenticate');
+            authButton.style.display = enabled ? 'block' : 'none';
+            authButton.disabled = !enabled;
+        }
+
+        function getFacialGuidanceTips(livenessScore, minLivenessRequired) {
+            const tips = [
+                '💡 Mejora la iluminación del rostro y evita contraluz.',
+                '🎯 Centra tu cara dentro del recuadro de la cámara.',
+                '📏 Acércate un poco más para que el rostro se vea completo.',
+            ];
+
+            if (livenessScore < Math.max(0.12, minLivenessRequired - 0.05)) {
+                tips.push('👀 Abre bien los ojos y evita parecer una foto estática.');
+            } else {
+                tips.push('🙂 Mantén la mirada al frente y evita girar la cabeza.');
+            }
+
+            return tips;
+        }
+
+        function buildLowLivenessMessage(actionLabel, confidencePct, livenessPct, minLivenessPct, tips) {
+            const tipsHtml = tips.map(tip => `<li>${tip}</li>`).join('');
+            return `
+                ⚠️ Rostro detectado, pero aún no se puede ${actionLabel}<br>
+                Confianza: ${confidencePct}%<br>
+                Liveness actual: ${livenessPct}%<br>
+                Mínimo requerido: ${minLivenessPct}%
+                <ul class="mb-0 mt-2 ps-3">${tipsHtml}</ul>
+            `;
+        }
 
         function showMessage(text, type = 'info') {
             messageDiv.textContent = text;
@@ -148,6 +217,132 @@
                     }, 1500);
                 } else {
                     showMessage('❌ ' + result.message, 'danger');
+                }
+            } catch (error) {
+                showMessage('❌ Error: ' + error.message, 'danger');
+            }
+        });
+
+        // Inicio de captura facial
+        document.getElementById('btn-facial-login').addEventListener('click', async () => {
+            const username = document.getElementById('facialUsername').value.trim();
+
+            if (!username) {
+                showMessage('❌ Por favor ingresa tu usuario', 'warning');
+                return;
+            }
+
+            try {
+                facialCapture = new FacialCameraCapture();
+                await facialCapture.init('facialVideo', 'facialCanvas');
+
+                document.getElementById('facial-container').style.display = 'block';
+                document.getElementById('btn-facial-login').style.display = 'none';
+                document.getElementById('btn-facial-stop').style.display = 'block';
+                showMessage('🎥 Cámara iniciada. Mira a la cámara...', 'info');
+
+                facialCapture.startDetection(async (frameData) => {
+                    const now = Date.now();
+                    if (now - lastDetectionTime < 500) return;
+                    lastDetectionTime = now;
+
+                    try {
+                        const response = await fetch('/facial/detect-frame', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ frame: frameData })
+                        });
+                        const data = await response.json();
+
+                        if (data.ok && data.face_detected) {
+                            const statusDiv = document.getElementById('facial-status');
+                            statusDiv.style.display = 'block';
+                            const livenessPct = (data.liveness_score * 100).toFixed(1);
+                            const minLivenessPct = ((data.min_liveness_required || 0) * 100).toFixed(1);
+                            const confidencePct = (data.confidence * 100).toFixed(1);
+                            const guidanceTips = getFacialGuidanceTips(
+                                data.liveness_score || 0,
+                                data.min_liveness_required || 0
+                            );
+
+                            if (data.can_authenticate) {
+                                statusDiv.className = 'alert alert-success mt-2';
+                                statusDiv.innerHTML = `
+                                    ✅ Rostro detectado<br>
+                                    Confianza: ${confidencePct}%<br>
+                                    Liveness: ${livenessPct}%
+                                `;
+                                setFacialAuthButtonEnabled(true);
+                            } else {
+                                statusDiv.className = 'alert alert-warning mt-2';
+                                statusDiv.innerHTML = buildLowLivenessMessage(
+                                    'autenticar',
+                                    confidencePct,
+                                    livenessPct,
+                                    minLivenessPct,
+                                    guidanceTips
+                                );
+                                setFacialAuthButtonEnabled(false);
+                            }
+                        } else {
+                            const statusDiv = document.getElementById('facial-status');
+                            statusDiv.style.display = 'block';
+                            statusDiv.className = 'alert alert-warning mt-2';
+                            statusDiv.innerHTML = '⏳ Buscando rostro...';
+                            setFacialAuthButtonEnabled(false);
+                        }
+                    } catch (error) {
+                        console.error('Error en deteccion:', error);
+                        setFacialAuthButtonEnabled(false);
+                    }
+                });
+
+            } catch (error) {
+                showMessage('❌ ' + error.message, 'danger');
+            }
+        });
+
+        document.getElementById('btn-facial-stop')?.addEventListener('click', () => {
+            if (facialCapture) {
+                facialCapture.stop();
+            }
+            document.getElementById('facial-container').style.display = 'none';
+            document.getElementById('btn-facial-login').style.display = 'block';
+            document.getElementById('btn-facial-stop').style.display = 'none';
+            setFacialAuthButtonEnabled(false);
+            showMessage('🛑 Captura detenida', 'info');
+        });
+
+        document.getElementById('btn-facial-authenticate')?.addEventListener('click', async () => {
+            const username = document.getElementById('facialUsername').value.trim();
+
+            if (!facialCapture) {
+                showMessage('❌ Captura no inicializada', 'danger');
+                return;
+            }
+
+            try {
+                showMessage('🔄 Comparando rostro...', 'info');
+                const frameData = facialCapture.captureFrame();
+
+                const response = await fetch('/facial/authenticate-frame', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        frame: frameData,
+                        username: username
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.ok) {
+                    showMessage(`✅ ${data.message} (Confianza: ${(data.confidence * 100).toFixed(1)}%)`, 'success');
+                    setTimeout(() => {
+                        window.location.href = data.redirect;
+                    }, 1500);
+                } else {
+                    showMessage(`❌ ${data.message}`, 'danger');
                 }
             } catch (error) {
                 showMessage('❌ Error: ' + error.message, 'danger');

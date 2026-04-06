@@ -12,14 +12,40 @@ Rutas a paginas del aplicativo hacia archivos HTML (Renderizados).
 
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
 from webauthn.helpers import options_to_json_dict
+from datetime import datetime
 from models.user import User
+from models.auth_event import AuthEvent
 from extensions import db
 from models.webauthn_credential import WebauthnCredential
+from utils.biometric_service import BiometricAuthService
 from utils.auth import api_login_required, page_login_required
 import io
 import base64
 import pyotp
 import qrcode
+
+
+biometric_service = BiometricAuthService()
+
+
+def get_request_ip() -> str | None:
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.remote_addr
+
+
+def register_auth_event(user: User | None, username: str | None, method: str, event_type: str, detail: str = "") -> None:
+    event = AuthEvent(
+        user_id=user.id if user else None,
+        username_snapshot=username or (user.username if user else None),
+        method=method,
+        event_type=event_type,
+        detail=detail,
+        ip_address=get_request_ip(),
+        user_agent=(request.user_agent.string or "")[:255],
+    )
+    db.session.add(event)
 
 def build_qr_base64(content: str) -> str:
     img = qrcode.make(content)
@@ -50,11 +76,15 @@ def login():
             remember = bool(data.get("remember_me", False))
 
             if not username or not password:
+                register_auth_event(None, username, "password", "failed", "Credenciales incompletas")
+                db.session.commit()
                 return jsonify({"ok": False, "message": "Credenciales invalidas"}), 400
 
             user = User.query.filter_by(username=username, is_active=True).first()
 
             if not user or not user.check_password(password):
+                register_auth_event(user, username, "password", "failed", "Credenciales invalidas")
+                db.session.commit()
                 return jsonify({"ok": False, "message": "Credenciales invalidas"}), 401
 
             # Si tiene TOTP activado, aun no se crea la sesion final
@@ -74,6 +104,9 @@ def login():
             session["user_id"] = user.id
             session["username"] = user.username
             session.permanent = remember
+            user.last_login_at = datetime.utcnow()
+            register_auth_event(user, username, "password", "success", "Login con password")
+            db.session.commit()
 
             return jsonify({
                 "ok": True,
@@ -81,6 +114,7 @@ def login():
                 "redirect": url_for("web.dashboard")
             }), 200
         except Exception:
+            db.session.rollback()
             return jsonify({"ok": False, "message": "Error interno al iniciar sesion"}), 500
 
     return render_template("pages/login.html")
@@ -172,11 +206,15 @@ def verify_2fa():
         code = (data.get("code") or "").strip()
 
         if not code:
+            register_auth_event(user, user.username, "totp", "failed", "Codigo TOTP vacio")
+            db.session.commit()
             return jsonify({"ok": False, "message": "Codigo requerido"}), 400
 
         totp = pyotp.TOTP(user.totp_secret)
 
         if not totp.verify(code, valid_window=1):
+            register_auth_event(user, user.username, "totp", "failed", "Codigo TOTP invalido")
+            db.session.commit()
             return jsonify({"ok": False, "message": "Codigo invalido"}), 401
 
         remember = bool(session.get("pre_2fa_remember", False))
@@ -188,6 +226,9 @@ def verify_2fa():
         session["user_id"] = user.id
         session["username"] = user.username
         session.permanent = remember
+        user.last_login_at = datetime.utcnow()
+        register_auth_event(user, user.username, "totp", "success", "Segundo factor validado")
+        db.session.commit()
 
         return jsonify({
             "ok": True,
@@ -206,11 +247,29 @@ def dashboard():
         session.clear()
         return redirect(url_for("web.login"))
 
-    return render_template("pages/dashboard.html", user=user)  # Pasar usuario al template
+    recent_events = (
+        AuthEvent.query
+        .filter_by(user_id=user.id)
+        .order_by(AuthEvent.created_at.desc())
+        .limit(8)
+        .all()
+    )
+    capabilities = biometric_service.capabilities(user)
+
+    return render_template(
+        "pages/dashboard.html",
+        user=user,
+        recent_events=recent_events,
+        biometric_capabilities=capabilities,
+    )
 
 @web.route("/logout", methods=["POST"])
 @api_login_required
 def logout():
+    user = db.session.get(User, session.get("user_id"))
+    if user:
+        register_auth_event(user, user.username, "session", "logout", "Sesion cerrada")
+        db.session.commit()
     session.clear()
     return jsonify({"ok": True, "message": "Sesion cerrada", "redirect": "/login"}), 200
 
@@ -320,11 +379,16 @@ def webauthn_authenticate_options():
     try:
         # Verificar que el usuario existe y tiene WebAuthn habilitado
         user = User.query.filter_by(username=username, is_active=True).first()
-        if not user or not user.webauthn_enabled:
-            return jsonify({"ok": False, "message": "Usuario no tiene WebAuthn configurado"}), 400
+        allowed, message = biometric_service.login_allowed(user)
+        if not allowed:
+            register_auth_event(user, username, "webauthn", "failed", message)
+            db.session.commit()
+            return jsonify({"ok": False, "message": message}), 400
 
         credentials = WebauthnCredential.query.filter_by(user_id=user.id).all()
         if not credentials:
+            register_auth_event(user, username, "webauthn", "failed", "Sin credenciales registradas")
+            db.session.commit()
             return jsonify({"ok": False, "message": "No hay credenciales WebAuthn registradas"}), 400
 
         credential_ids = [c.credential_id for c in credentials]
@@ -348,7 +412,6 @@ def webauthn_authenticate_options():
 def webauthn_authenticate_verify():
     """Verifica la autenticación con WebAuthn"""
     from utils.webauthn_utils import verify_authentication
-    from datetime import datetime
 
     data = request.get_json(silent=True) or {}
     credential_data = data.get("credential")
@@ -361,6 +424,8 @@ def webauthn_authenticate_verify():
     try:
         user = User.query.filter_by(username=username, is_active=True).first()
         if not user:
+            register_auth_event(None, username, "webauthn", "failed", "Usuario no encontrado")
+            db.session.commit()
             return jsonify({"ok": False, "message": "Usuario no encontrado"}), 401
 
         # Obtener la credencial
@@ -371,6 +436,8 @@ def webauthn_authenticate_verify():
         ).first()
 
         if not credential:
+            register_auth_event(user, username, "webauthn", "failed", "Credencial no registrada")
+            db.session.commit()
             return jsonify({"ok": False, "message": "Credencial no registrada"}), 401
 
         # Verificar la autenticación
@@ -382,19 +449,23 @@ def webauthn_authenticate_verify():
         )
 
         if not verified:
+            register_auth_event(user, username, "webauthn", "failed", "Autenticacion invalida")
+            db.session.commit()
             return jsonify({"ok": False, "message": "Autenticación fallida"}), 401
 
         # Actualizar sign_count y last_used
         credential.sign_count = new_sign_count
         credential.last_used = datetime.utcnow()
-        db.session.commit()
 
         # Crear la sesión
         session["user_id"] = user.id
         session["username"] = user.username
+        user.last_login_at = datetime.utcnow()
+        register_auth_event(user, username, "webauthn", "success", "Login biometrico")
         session.pop("webauthn_auth_challenge", None)
         session.pop("webauthn_auth_username", None)
         session.modified = True
+        db.session.commit()
 
         return jsonify({
             "ok": True,
@@ -402,7 +473,50 @@ def webauthn_authenticate_verify():
             "redirect": url_for("web.dashboard")
         }), 200
     except Exception as e:
+        db.session.rollback()
         return jsonify({"ok": False, "message": str(e)}), 401
+
+
+@web.route("/auth-events/recent", methods=["GET"])
+@api_login_required
+def auth_events_recent():
+    user = db.session.get(User, session["user_id"])
+    if not user:
+        return jsonify({"ok": False, "message": "Sesion invalida"}), 401
+
+    limit = request.args.get("limit", default=10, type=int)
+    limit = max(1, min(limit, 30))
+
+    events = (
+        AuthEvent.query
+        .filter_by(user_id=user.id)
+        .order_by(AuthEvent.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return jsonify({"ok": True, "events": [event.to_dict() for event in events]}), 200
+
+
+@web.route("/webauthn/login-toggle", methods=["POST"])
+@api_login_required
+def webauthn_login_toggle():
+    user = db.session.get(User, session["user_id"])
+    if not user:
+        return jsonify({"ok": False, "message": "Sesion invalida"}), 401
+
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get("enabled", True))
+
+    user.biometric_login_enabled = enabled
+    detail = "Login biometrico activado" if enabled else "Login biometrico desactivado"
+    register_auth_event(user, user.username, "webauthn", "success", detail)
+    db.session.commit()
+
+    return jsonify({
+        "ok": True,
+        "message": detail,
+        "biometric_login_enabled": user.biometric_login_enabled,
+    }), 200
 
 
 @web.route("/webauthn/credentials", methods=["GET"])
