@@ -1,0 +1,17 @@
+<header>
+    <h1>MiAppFlask</h1>
+
+    <nav>
+        <ul>
+            <li><a href="{{ url_for('web.index') }}">Inicio</a></li>
+
+            {% if session.get('user_id') %}
+                <li><a href="{{ url_for('web.dashboard') }}">Dashboard</a></li>
+                <li><button type="button" id="btn-logout">Logout</button></li>
+            {% else %}
+                <li><a href="{{ url_for('web.login') }}">Login</a></li>
+            {% endif %}
+
+        </ul>
+    </nav>
+</header>
